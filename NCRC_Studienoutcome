@@ -1,0 +1,309 @@
+#* Datensätzen herunterladen ----
+
+#setwd("~/R/0,_C_NCRC/0,_Admin/Studienoutcome/NCRC_Studienoutcome_RShiny")
+token <- "EA643B6733390E5B15AD7C87B0DA236C"
+
+url <- "https://redcap.charite.de/ncrc/api/"
+formData <- list("token"=token,
+                 content='record',
+                 action='export',
+                 format='csv',
+                 type='flat',
+                 csvDelimiter='',
+                 rawOrLabel='label',
+                 rawOrLabelHeaders='label',
+                 exportCheckboxLabel='true',
+                 exportSurveyFields='false',
+                 exportDataAccessGroups='false',
+                 returnFormat='csv'
+)
+response <- httr::POST(url, body = formData, encode = "form")
+dt <- httr::content(response)
+
+#* Dataframe anpassen ----
+
+colnames(dt)[(grep("Arbeitsgruppe",colnames(dt)))[1]] <-"Arbeitsgruppe"
+colnames(dt)[(grep("Arbeitsgruppe",colnames(dt)))[2]] <-"Arbeitsgruppe2"
+
+# colnames(dt)
+library(dplyr)
+dt <- mutate(dt, Arbeitsgruppe = ifelse(dt$`Studien ID in Access DB` == 10000
+                                        ,10000
+                                        ,ifelse(!is.na(dt$Arbeitsgruppe)
+                                                ,dt$Arbeitsgruppe,
+                                                NA
+                                        )
+)
+)
+dt <- mutate(dt, Arbeitsgruppe = ifelse(is.na(dt$Arbeitsgruppe2)
+                                        ,dt$Arbeitsgruppe
+                                        ,dt$Arbeitsgruppe2
+)
+)
+dt <- mutate(dt, `Kurztitel NCRC-Studie` = ifelse(dt$`Studien ID in Access DB` == 10000
+                                                  ,10000
+                                                  ,dt$`Kurztitel NCRC-Studie`
+)
+)
+
+# die leeren Felder von Kurztitel ausfüllen
+library(tidyr)
+
+dt <- dt %>% fill(`Kurztitel NCRC-Studie`)
+
+dt <- dt %>% fill(Arbeitsgruppe)
+
+# die Variablen von "Merkmalen"Character" in "Faktoren"Factors" umwandeln.
+dt$`Studien ID in Access DB` <- as.factor(dt$`Studien ID in Access DB`)
+dt$`Kurztitel NCRC-Studie` <- as.factor(dt$`Kurztitel NCRC-Studie`)
+dt$Arbeitsgruppe <- as.factor(dt$Arbeitsgruppe)
+dt$Erscheinungsjahr <- as.factor(dt$Erscheinungsjahr)
+# nue Datensatz nur aus ""Publikationsmerkmale" erstellen
+
+dt2<- dt[!is.na(dt$`Repeat Instrument`),]
+
+#* Darstellungen -----
+##* Publikationsanzahl ----
+###* Publikationsanzahl pro Jahr 
+
+#install.packages("ggplot2")
+library(ggplot2)
+#install.packages("tables")
+library(tables) 
+#install.packages("lessR")
+library(lessR)
+#install.packages("tidyverse")
+library(tidyverse)
+#install.packages("gt")
+library(gt)
+
+
+tb_e <- table(dt2$Erscheinungsjahr)
+df_e <- as.data.frame(tb_e)
+
+df_e2 <- df_e %>%
+  ggplot(aes(x= Var1, y = Freq))+
+  geom_bar(stat = "identity",fill = 1)+
+  xlab("Erscheinungsjahr")+
+  ylab("Anzahl")+
+  geom_text(aes(label = Freq), vjust = -1, colour = "black")
+
+###* Publikationsanzahl pro Arbeitsgruppe 
+
+tb_a <- table(dt2$Arbeitsgruppe)
+df_a <- as.data.frame(tb_a)
+
+df_a2 <- df_a %>%
+  ggplot(aes(x= Freq, y = reorder(Var1,Freq)))+
+  geom_bar(stat = "identity", fill = "#151B54")+
+  xlab("Anzahl")+
+  ylab("Arbeitsgruppe")+
+  geom_text(aes(label = Freq), hjust = -0.5, colour = "black")
+
+###* Publikationsanzahl pro Publikationstyp
+
+tb_pt <- table(dt2$Publikationstyp)
+df_pt <- as.data.frame(tb_pt)
+
+df_pp2<- df_pt %>%
+  ggplot(aes(x= Freq, y = reorder(Var1,Freq)))+
+  geom_bar(stat = "identity", fill ="#8B0000")+
+  xlab("Anzahl")+
+  ylab("Publikationstyp")+
+  geom_text(aes(label = Freq), hjust = -0.5, colour = "black")
+
+###* Publikationsanzahl pro AG pro Jahr
+
+tb_ag <-table(dt2$Arbeitsgruppe,dt2$Erscheinungsjahr)
+df_ag  <- as.data.frame.matrix(tb_ag)
+df_ag$AG <- rownames(df_ag)
+df_ag <- df_ag[,c(ncol(df_ag),1:ncol(df_ag)-1)]
+rownames(df_ag) <-NULL
+
+df_ag2<-df_ag%>%
+  gt()%>%
+  data_color(
+    columns = c(2:14),
+    colors = scales::col_numeric (
+      palette = c("#FFFAFA","#91AEC0", "#C09191") ,
+      domain = c(0,100))
+  )
+
+df_ag1 <- na.omit(dt2[,c("Erscheinungsjahr","Arbeitsgruppe")])
+
+df_ag3<- df_ag1 %>%
+  ggplot(aes(x = Erscheinungsjahr, fill= Arbeitsgruppe))+
+  geom_bar()
+
+###* Publikationsanzahl pro Publikationstyp pro Jahr
+
+tb_pt <-table(dt2$Publikationstyp,dt2$Erscheinungsjahr)
+df_pt  <- as.data.frame.matrix(tb_pt)
+df_pt$PT <- rownames(df_pt)
+df_pt <- df_pt[,c(ncol(df_pt),1:ncol(df_pt)-1)]
+rownames(df_pt) <-NULL
+
+df_pt3 <- gt(df_pt)
+
+df_pt1 <- na.omit(dt2[,c("Erscheinungsjahr","Publikationstyp")])
+
+df_pt2<-df_pt1 %>%
+  ggplot(aes(y = Erscheinungsjahr, fill= Publikationstyp))+
+  geom_bar()
+
+###* Publikationsanzahl pro Publikationstyp pro AG
+
+tb_ptag <-table(dt2$Publikationstyp,dt2$Arbeitsgruppe)
+df_ptag  <- as.data.frame.matrix(tb_ptag)
+df_ptag$PT_ag <- rownames(df_ptag)
+df_ptag <- df_ptag[,c(ncol(df_ptag),1:ncol(df_ptag)-1)]
+rownames(df_ptag) <-NULL
+
+df_ptag3<- gt(df_ptag)
+
+df_ptag1 <- na.omit(dt2[,c("Publikationstyp","Arbeitsgruppe")])
+
+df_ptag2<-df_ptag1 %>%
+  ggplot(aes(y = Publikationstyp, fill= Arbeitsgruppe))+
+  geom_bar()
+
+##* Studien/Projekt ----
+###* Studien/Projekt pro Jahr
+
+tb_tj <-table(dt2$`Kurztitel NCRC-Studie`,dt2$Erscheinungsjahr)
+df_tj  <- as.data.frame.matrix(tb_tj)
+df_tj$PT_ag <- rownames(df_tj)
+df_tj <- df_tj[,c(ncol(df_tj),1:ncol(df_tj)-1)]
+rownames(df_tj) <-NULL
+
+# if (!require("DT")) install.packages('DT')
+library(DT)
+df_tj2<-datatable(df_tj, class = 'cell-border stripe')
+
+df_tj3<-gt(df_tj)
+
+###* Studien/Projekt pro AG
+
+tb_tag <-table(dt2$`Kurztitel NCRC-Studie`,dt2$Arbeitsgruppe)
+df_tag  <- as.data.frame.matrix(tb_tag)
+df_tag$PT_ag <- rownames(df_tag)
+df_tag <- df_tag[,c(ncol(df_tag),1:ncol(df_tag)-1)]
+rownames(df_tag) <-NULL
+
+# if (!require("DT")) install.packages('DT')
+library(DT)
+datatable(df_tag, class = 'cell-border stripe')
+
+df_tag1 <- na.omit(dt2[,c("Kurztitel NCRC-Studie","Arbeitsgruppe")])
+
+df_tag2<-df_tag1 %>%
+  ggplot(aes(y =`Kurztitel NCRC-Studie`, fill= Arbeitsgruppe))+
+  geom_bar()
+
+###* Studien/Projekt pro Studientyp
+
+df_tag1 <- na.omit(dt2[,c("Kurztitel NCRC-Studie","Arbeitsgruppe")])
+
+df_tag3<-df_tag1 %>%
+  ggplot(aes(x =`Kurztitel NCRC-Studie`, fill= Arbeitsgruppe))+
+  geom_bar()
+
+##* Erstellung der Listen zur Darstellung der Daten ----
+
+# Liste der Graphiken
+data_list1<-list(
+  "Publikationsanzahl pro Jahr" = df_e2,
+  "Publikationsanzahl pro Arbeitsgruppe" = df_a2,
+  "Publikationsanzahl pro Publikationstyp" = df_pp2,
+  "Publikationsanzahl pro AG pro Jahr"= df_ag3,
+  "Publikationsanzahl pro Publikationstyp pro Jahr" = df_pt2,
+  "Publikationsanzahl pro Publikationstyp pro AG" = df_ptag2
+)
+
+# Liste der Tabellen
+data_list2<-list(
+  "Publikationsanzahl pro AG pro Jahr"= df_ag2,
+  "Publikationsanzahl pro Publikationstyp pro Jahr" = df_pt3,
+  "Publikationsanzahl pro Publikationstyp pro AG" = df_ptag3,
+  "Studien/Projekt pro Jahr" = df_tj3,
+  "Studien/Projekt pro AG" =  gt(df_tag)
+)
+
+#* Schiny-App ----
+
+library(shiny)
+
+##* Define UI for app ----
+ui <- fluidPage(
+  titlePanel("StudienOutcome"),
+  #type of Widget:
+  sidebarLayout(
+    sidebarPanel(
+      height = 10,
+      h3("Graphiken"),
+      #Imput:
+      selectInput("pub_an",
+                  h4("Wählen Sie die Kategorie:"), 
+                  choices = names(data_list1),
+                  selected = 1
+      )
+    ),
+    # Main panel for displaying outputs
+    mainPanel(
+      h2(""),
+      hehgt = 10,
+      # Output:
+      plotOutput(
+        outputId = "table1"
+      )
+    )
+  ),
+  sidebarLayout(
+    sidebarPanel(
+      width = 3,
+      h3("Tabellen"),
+      #Imput:
+      selectInput(
+        inputId = "stu_pro",
+        label   = h4("Wählen Sie die Kategorie:"),
+        choices = names(data_list2)
+      )
+    ),
+    # Main panel for displaying outputs
+    mainPanel(
+      h2(""),
+      # Output:
+      tableOutput('table2')
+    )
+  )
+)
+
+
+
+##* Define server logic ----
+server <- function(input, output) {
+  
+  # This expression that generates an output is wrapped in a call
+  # to renderPlot to indicate that:
+  #
+  # 1. It is "reactive" and therefore should be automatically
+  #    re-executed when inputs (input$bins) change
+  # 2. Its output type is a Plot and Table
+  
+  ##Reactive Programming
+  rv <- reactiveValues()
+  observe({
+    rv$table1 <- data_list1 %>% pluck(input$pub_an)
+    rv$table2 <- data_list2 %>% pluck(input$stu_pro)
+  })
+  output$table1 <- renderPlot({
+    rv$table1})
+  output$table2 <- renderTable({
+    rv$table2
+  })
+}
+
+##* Create the Shiny app ----
+shinyApp(ui = ui, server = server)
+
+
